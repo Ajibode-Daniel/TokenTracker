@@ -112,9 +112,87 @@ try {
         }
     } catch(priceApiError: any){
         console.error("Error fetching price from API:", priceApiError.response?.data || priceApiError.message);
-
     }
 
+    // ---Market Cap Fetch ---
+    if (price !== undefined) {
+        marketCap = convertToDecimal(totalSupplyRaw, decimals).multipliedBy(price).toNumber();
+        console.log(`Market Cap: ${marketCap?.toLocaleString()}`);
+    }
+
+    //----Liquidity & holders (Example - Often requires different API calls)---
+    // Birdeye API might provide liquidity or holders directly.
+
+    const OVERVIEW_ENDPOINT = `https://public-api.birdeye.so/public/overview?address=${mintAddress}`;
+    try{
+        const overviewResponse = await axios.get(OVERVIEW_ENDPOINT, { headers: HEADERS });
+        //Check paths based on actual API response structure
+        liquidityUsd = overviewResponse.data?.data?.liquidity;
+        holders = overviewResponse.data?.data?.holders;
+        volume24h = overviewResponse.data?.data?.volume24h;
+        console.log(`Liquidity: ${liquidityUsd}, Holders: ${holders}, Volume 24h: ${volume24h}`);
+    }catch(overviewApiError: any) {
+        console.error("Error fetching overview data from API:", overviewApiError.response?.data || overviewApiError.message);
+    }
+
+} catch(apiError) {
+    console.error("Error fetching data from external API:", apiError);
+    //Continue without API data if it fails
+    //You might want to set defaults or handle this case
+}
+
+//---Construct Final Token Details Object---
+const result: TokenDetails = {
+    address: mintAddress,
+    name: metadata.name,
+    symbol: metadata.symbol,
+    imageURL: metadata.image || '',
+    decimals: decimals,
+    totalSupply: totalSupplyFormatted,
+    totalSupplyRaw: totalSupplyRaw,
+    mintAuthority: mintInfo.mintAuthority?.toBase58() || null,
+    freezeAuthority: mintInfo.freezeAuthority?.toBase58() || null,
+    price: price,
+    marketcCap: marketCap,
+    liquidityUsd: liquidityUsd,
+    holders: holders,
+    volume24h: volume24h
+};
+
+return result
+}
+catch (error) {console.error(`Failed to get details for mint ${mintAddress}:`, error);
+    return null; //Return null if any error occurs
+}
+}  
+
+// ---Example Usage---
+async function main() {
+    const tokenAddress = process.argv[2]; //Get token address from command line argument
+
+    if (!tokenAddress) {
+        console.error("Please provide a solana token address as a command line argument.");
+        console.log("Usage: ts-node tracker.ts <TOKEN_ADDRESS>");
+        process.exit(1);
+    } try{
+        new PublicKey(tokenAddress); //Validate address format
+    } catch{
+        console.error("Invalid Solana token address format.");
+        process.exit(1);
+    }
+
+    const tokenDetails = await getTokenDetails(tokenAddress);
+    if (tokenDetails) {
+        console.log("\nToken Details:");
+        console.log(JSON.stringify(tokenDetails, (key, valuen) =>
+            typeof value === 'bigint' ? value.toString() : value, //Convert BigInt for JSON stringify
+              2));
+
+              console.log("---------/n");
+}else {
+        console.log("No details found for the provided token address.");
+    }
 
 }
 
+main()
