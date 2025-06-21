@@ -1,6 +1,6 @@
 import {Connection, PublicKey, clusterApiUrl} from '@solana/web3.js';
 import {getMint} from '@solana/spl-token';
-import {Metaplex, keypairIdentity, bundlrStorage} from '@metaplex-foundation/js';
+import {Metaplex} from '@metaplex-foundation/js';
 //import {Metadata} from '@metaplex-foundation/mpl-token-metadata';
 import axios from 'axios';
 import BigNumber from 'bignumber.js';
@@ -23,13 +23,13 @@ function convertToDecimal(amount:bigint | number, decimals:number):BigNumber {
 // --Main Tracking Fucntion--
 interface TokenDetails {
     address: string;
-    name: string;
-    symbol: string;
-    imageURL: string;
+    name?: string;
+    symbol?: string;
+    imageURL?: string;
     decimals: number;
     totalSupply: string; //Formatted total supply
     totalSupplyRaw: bigint; 
-    mintAuthority?: string; | null;
+    mintAuthority?: string | null;
     freezeAuthority?: string | null;
     price?:number;
     marketcCap?:number;
@@ -38,7 +38,7 @@ interface TokenDetails {
     volume24h?:number; 
 }
 
-async function getTokenDetails(tokenAddress: string): Promise<TokenDetails | null> {
+async function getTokenDetails(mintAddress: string): Promise<TokenDetails | null> {
     console.log(`Fetching details for mint: ${mintAddress}`);
     try{
         const mintPublicKey = new PublicKey(mintAddress);
@@ -54,30 +54,40 @@ async function getTokenDetails(tokenAddress: string): Promise<TokenDetails | nul
         console.log(`Supply: ${totalSupplyFormatted}, Decimals: ${decimals}`);
 
         //2. Get Metadata (On-chain PDA Address -> Off-Chain JSON)
-        let metadata = {name:"N/A", symbol:"N/A", uri: "",image: undefined};
-    }; try {
+        //Initalize metadata variable, they will be updted if data is found
+
+        let tokenName: string | undefined = undefined;
+        let tokenSymbol: string | undefined = undefined;
+        let tokenImageURL: string | undefined = undefined;
+     try { //I am using an inner try to metaplex and json fething, so errors don't stop everything
+
         console.log("Fetching Metaplex metadata...");
         //Using the Metaplex SDK to get metadata
         const nftOrToken = await metaplex.nfts().findByMint({ mintAddress: mintPublicKey });
-        metadata.name = nftOrToken.name;
-        metadata.symbol = nftOrToken.symbol;
-        metadata.uri = nftOrToken.uri;
+        //data from the fetched JSOn if fields are empty in the on-chain meta data
+
+        tokenName = nftOrToken.name;
+        tokenSymbol = nftOrToken.symbol;
+        const metadataUri = nftOrToken.uri;
 
         //Fetch the JSON metadata from the URI if it exists
-        if (metadata.uri) {
+        if (metadataUri) {
             try{
-                console.log("Fetching JSON metadata from: ${metadata.uri}");
-                const response = await axios.get(metadata.uri);
-                metadata.image = response.data.image; //Assuming stanadard structure
+                console.log("Fetching JSON metadata from: ${metadataUri}");
+                const response = await axios.get(metadataUri);
+                tokenImageURL = response.data.image; //Assuming stanadard structure
 
                 //You might want to parse other fields too (description, etc)
 
-    }catch (jsonError) {
-        console.error(`Could not fetch or parse metadata JSON from ${metadata.uri}:`, jsonError); 
+                if (!tokenName && response.data.name) tokenName = response.data.name;
+                if (!tokenSymbol && response.data.symbol) tokenSymbol = response.data.symbol;
+
+    }catch (jsonError: any) { //Added "any" type for error
+        console.warn(`Could not fetch or parse metadata JSON from ${metadataUri}:`, jsonError.message); 
 
     }}
-}catch (metaError){
-    console.warn(`Could not find Metaplex metadata for ${mintAddress}:`, metaError);
+}catch (metaError:any){
+    console.warn(`Could not find Metaplex metadata for ${mintAddress}:`, metaError.message);
     //Handle cases where no Metaplex metadata exists
 }
 
@@ -92,13 +102,13 @@ let price: number | undefined = undefined;
 let marketCap: number | undefined = undefined;
 let liquidityUsd: number | undefined = undefined;
 let holders: number | undefined = undefined;
-let volume24h: number | undefined = undefined; //Hard to accurately on-chain
+let volume24h: number | undefined = undefined; //Hard to get accurately on-chain
 
 //Example using a hypothetical Price/Data API (e.g., Birdeye - replace with actual API calls)
 try {
     console.log("Fetching data from external API (e.g., Birdeye)...");
     //Replace with actual API call 
-    const API_ENDPOINT = `https://public-api.birdeye.so/public/price?address=${mintAddress}`;//Check Birdeye docs
+    const API_ENDPOINT = `https://public-api.birdeye.so/defi/price?address=${mintAddress}`;//Check Birdeye docs
     const HEADERS = {"X-API-Key": "YOUR_BRIDEYE_API"}; //Get API key from Birdeye
 
     // ---Price Fetch ---
@@ -123,7 +133,7 @@ try {
     //----Liquidity & holders (Example - Often requires different API calls)---
     // Birdeye API might provide liquidity or holders directly.
 
-    const OVERVIEW_ENDPOINT = `https://public-api.birdeye.so/public/overview?address=${mintAddress}`;
+    const OVERVIEW_ENDPOINT = `https://public-api.birdeye.so/defi/token_overview?address=${mintAddress}`;
     try{
         const overviewResponse = await axios.get(OVERVIEW_ENDPOINT, { headers: HEADERS });
         //Check paths based on actual API response structure
@@ -144,9 +154,9 @@ try {
 //---Construct Final Token Details Object---
 const result: TokenDetails = {
     address: mintAddress,
-    name: metadata.name,
-    symbol: metadata.symbol,
-    imageURL: metadata.image || '',
+    name: tokenName || "N?A",
+    symbol: tokenSymbol || "N/A",
+    imageURL: tokenImageURL,
     decimals: decimals,
     totalSupply: totalSupplyFormatted,
     totalSupplyRaw: totalSupplyRaw,
@@ -184,7 +194,7 @@ async function main() {
     const tokenDetails = await getTokenDetails(tokenAddress);
     if (tokenDetails) {
         console.log("\nToken Details:");
-        console.log(JSON.stringify(tokenDetails, (key, valuen) =>
+        console.log(JSON.stringify(tokenDetails, (key, value) =>
             typeof value === 'bigint' ? value.toString() : value, //Convert BigInt for JSON stringify
               2));
 
